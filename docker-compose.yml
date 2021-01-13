@@ -1,0 +1,52 @@
+version: '3'
+
+services:
+  nodejs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nodejs
+    container_name: lom
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DB_USERNAME=$DB_USERNAME
+      - DB_PASSWORD=$DB_PASSWORD
+      - DB_HOSTNAME=lom-db
+      - DB_NAME=$DB_NAME
+      - DB_DIALECT=$DB_DIALECT
+      - googleClientID=$googleClientID
+      - googleClientSecret=$googleClientSecret
+      - cookieSecretKey=$cookieSecretKey
+      - jwtSecretKey=$jwtSecretKey
+
+    ports:
+      - "80:8080"
+    volumes:
+      - .:/home/node/app
+      - node_modules:/home/node/app/node_modules
+    networks:
+      - app-network
+    command: ./wait-for.sh lom-db:5432 -- nodemon ./index.js
+
+  lom-db:
+    image: "postgres"
+    container_name: lom-db
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - POSTGRES_USER=$DB_USERNAME
+      - POSTGRES_PASSWORD=$DB_PASSWORD
+      - POSTGRES_DB=$DB_NAME
+    volumes:
+      - database-data:/var/lib/postgresql/data/
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  dbdata:
+  node_modules:
