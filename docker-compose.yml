@@ -27,7 +27,7 @@ services:
       - node_modules:/home/node/app/node_modules
     networks:
       - app-network
-    command: ./wait-for.sh lom-db:5432 -- nodemon ./index.js
+    command: ./wait-for.sh lom-db:5432 -- /home/node/app/node_modules/.bin/nodemon ./index.js
 
   lom-db:
     image: "postgres"

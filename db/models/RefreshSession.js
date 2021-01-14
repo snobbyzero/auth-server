@@ -4,7 +4,7 @@ const DataTypes = require('sequelize');
 const RefreshSession = sequelize.define('RefreshSession',
     {
         refreshToken: {
-            type: DataTypes.UUIDV4,
+            type: DataTypes.UUID,
             field: 'refresh_token'
         },
         userAgent: {
