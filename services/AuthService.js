@@ -9,7 +9,7 @@ const {destroy} = require("../utils/dbFunctions");
 const secretKey = process.env.jwtSecretKey;
 
 const createAccessToken = async (user) => {
-    const token = await jwt.sign({id: user.id, email: user.email}, secretKey, {
+    const token = await jwt.sign({id: user.id, google_id: user.googleId, email: user.email}, secretKey, {
         algorithm: 'HS256',
         expiresIn: '30m'
     });
@@ -21,7 +21,7 @@ const createRefreshSession = async (userId, fingerprint, userAgent) => {
     expiresIn.setMonth(expiresIn.getMonth() + 2);
     const refreshToken = await uuidv4();
     const res = await create(RefreshSession, {
-            userId: userId,
+            user_id: userId,
             fingerprint: fingerprint,
             userAgent: userAgent,
             expiresIn: expiresIn.getTime(),
@@ -40,22 +40,24 @@ const findOrCreateUser = async (user) => {
         return savedUser;
     }
     return await create(User, {
-        id: user.id,
+        google_id: user.googleId,
         email: user.email
     });
 };
 
+// TODO avoid creation of refresh tokens from one client using fingerprint (additionally ip)
 module.exports.createTokens = async (user, fingerprint, userAgent) => {
-    const [savedUser, accessToken, refreshToken] = await Promise.all(
-        [
-            findOrCreateUser(user),
-            createAccessToken(user),
-            createRefreshSession(user.id, fingerprint, userAgent)
-        ]
-    );
+    const savedUser = await findOrCreateUser(user);
+
     if (savedUser.error) {
         return savedUser;
     }
+    const [accessToken, refreshToken] = await Promise.all(
+        [
+            createAccessToken(savedUser),
+            createRefreshSession(savedUser.id, fingerprint, userAgent)
+        ]
+    );
     if (refreshToken.error) {
         return refreshToken;
     }
@@ -69,7 +71,7 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
     if (refreshToken) {
         const refreshSession = await findOne(RefreshSession, {refreshToken: refreshToken});
         if (refreshSession) {
-            destroy(refreshSession);
+            await destroy(refreshSession);
             if (refreshSession.fingerprint !== fingerprint) {
                 return {error: 'INVALID_REFRESH_SESSION'};
             }
@@ -83,7 +85,7 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
             const [newAccessToken, newRefreshToken] = await Promise.all(
                 [
                     createAccessToken(user),
-                    createRefreshSession(user, fingerprint, userAgent)
+                    createRefreshSession(user.id, fingerprint, userAgent)
                 ]
             );
 

@@ -1,16 +1,16 @@
 const {sequelize} = require('../index');
 const DataTypes = require('sequelize');
+const {RefreshSession} = require("./RefreshSession");
 
 const User = sequelize.define('User',
     {
-        id: {
-            type: DataTypes.DECIMAL,
-            primaryKey: true,
-            field: 'google_id'
-        },
         email: {
             type: DataTypes.STRING,
             field: 'email'
+        },
+        googleId: {
+            type: DataTypes.STRING(21),
+            field: 'google_id'
         }
     },
     {
@@ -21,5 +21,11 @@ const User = sequelize.define('User',
         tableName: 'users'
     });
 
+User.hasMany(RefreshSession, {
+    foreignKey: 'user_id'
+});
+RefreshSession.belongsTo(User, {
+    foreignKey: 'user_id'
+})
 
 module.exports.User = User;

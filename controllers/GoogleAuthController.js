@@ -18,14 +18,14 @@ router.get("/", passport.authenticate("google", {
 }));
 
 router.get("/redirect", passport.authenticate("google", {session: false}), asyncMiddleware(async (req, res) => {
-    const tokens = await createTokens(req.user, 'fingerprint', req.headers.userAgent);
+    const tokens = await createTokens(req.user, req.headers['fingerprint'], req.get('User-Agent'));
     res.cookie('refreshToken', tokens.refreshToken, {httpOnly: true, maxAge: 2 * 30 * 24 * 60 * 60 * 1000, signed: true});
     res.status(200).send(tokens);
 }));
 
-router.post("/refresh", asyncMiddleware(async (req, res) => {
+router.get("/refresh", asyncMiddleware(async (req, res) => {
     console.log(req.signedCookies);
-    const tokens = await updateTokens(req.headers.authorization, req.signedCookies.refreshToken, 'fingerprint', req.headers.userAgent);
+    const tokens = await updateTokens(req.headers.authorization, req.signedCookies.refreshToken, req.headers['fingerprint'], req.get('User-Agent'));
     res.cookie('refreshToken', tokens.refreshToken, {httpOnly: true, maxAge: 2 * 30 * 24 * 60 * 60 * 1000, signed: true});
     res.status(200).send(tokens);
 }));
@@ -36,12 +36,12 @@ passport.use(new GoogleStrategy(
         clientSecret: process.env.googleClientSecret,
         callbackURL: '/auth/google/redirect'
     }, async (accessToken, refreshToken, profile, cb) => {
-        const user = await findOne(User, {id: profile.id});
+        const user = await findOne(User, {googleId: profile.id});
         if (user) {
             cb(null, user);
         } else {
-            const user = await create(User, {id: profile.id, email: profile.emails[0].value});
-            cb(null, user);
+            const u = await create(User, {googleId: profile.id, email: profile.emails[0].value});
+            cb(null, u);
         }
     })
 );
