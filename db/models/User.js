@@ -8,6 +8,10 @@ const User = sequelize.define('User',
             type: DataTypes.STRING,
             field: 'email'
         },
+        password: {
+            type: DataTypes.STRING,
+            field: 'password'
+        },
         googleId: {
             type: DataTypes.STRING(21),
             field: 'google_id'

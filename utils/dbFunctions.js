@@ -15,18 +15,23 @@ module.exports.create = async (model, item, include = []) => {
     }
 }
 
-module.exports.update = async (prevItem, item, include, conditions) => {
+module.exports.update = async (model, item, include, conditions) => {
     try {
         return await sequelize.transaction(async (t) => {
-            const res = await prevItem.update(item, {include: include, where: conditions, transaction: t, returning: true, plain: true});
-            return res.get({plain: true});
+            const res = await model.update(item, {
+                include: include,
+                where: conditions,
+                transaction: t,
+                returning: true,
+                plain: true
+            });
+            return res[1].get({plain: true});
         });
     } catch (err) {
         logger.error(err);
         return {error: err};
     }
 }
-
 
 module.exports.findAll = async (model, conditions, include = []) => {
     return await model.findAll({

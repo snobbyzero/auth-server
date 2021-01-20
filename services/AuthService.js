@@ -1,4 +1,6 @@
 const jwt = require("jsonwebtoken");
+const {hash, verify} = require("../utils/securePassword");
+const {update} = require("../utils/dbFunctions");
 const {findOne} = require("../utils/dbFunctions");
 const {User} = require("../db/models/User");
 const {RefreshSession} = require("../db/models/RefreshSession");
@@ -9,7 +11,7 @@ const {destroy} = require("../utils/dbFunctions");
 const secretKey = process.env.jwtSecretKey;
 
 const createAccessToken = async (user) => {
-    const token = await jwt.sign({id: user.id, google_id: user.googleId, email: user.email}, secretKey, {
+    const token = await jwt.sign({id: user.id, email: user.email}, secretKey, {
         algorithm: 'HS256',
         expiresIn: '30m'
     });
@@ -35,36 +37,99 @@ const createRefreshSession = async (userId, fingerprint, userAgent) => {
 };
 
 const findOrCreateUser = async (user) => {
-    const savedUser = await findOne(User, {id: user.id})
+    console.log(user);
+    let savedUser;
+    // If user try to sign in/up via Google OAuth2
+    if (user.googleId) {
+        savedUser = await findOne(User, {google_id: user.googleId});
+    } else {
+        savedUser = await findOne(User, {email: user.email});
+        if (savedUser && !(await verify(user.password, savedUser.password))) {
+            return null;
+        }
+    }
     if (savedUser) {
         return savedUser;
     }
     return await create(User, {
         google_id: user.googleId,
-        email: user.email
+        email: user.email,
+        password: await hash(user.password)
     });
 };
 
-// TODO avoid creation of refresh tokens from one client using fingerprint (additionally ip)
-module.exports.createTokens = async (user, fingerprint, userAgent) => {
+module.exports.addPassword = async (user) => {
+    const savedUser = await findOne(User, {
+        id: user.id,
+        google_id: user.googleId,
+        email: user.email,
+        password: null
+    });
+    if (savedUser) {
+        const u = await update(User, {password: await hash(user.password)}, [], {
+            id: user.id,
+            google_id: user.googleId,
+            email: user.email
+        });
+        if (u.error) {
+            return {
+                status: 400,
+                body: u
+            };
+        } else {
+            return {
+                status: 200,
+                body: 'OK'
+            };
+        }
+    } else {
+        return {
+            status: 404,
+            body: 'NOT_FOUND'
+        }
+    }
+};
+
+module.exports.createTokensViaCredentials = async (user, fingerprint, userAgent) => {
     const savedUser = await findOrCreateUser(user);
 
-    if (savedUser.error) {
-        return savedUser;
-    }
-    const [accessToken, refreshToken] = await Promise.all(
-        [
-            createAccessToken(savedUser),
-            createRefreshSession(savedUser.id, fingerprint, userAgent)
-        ]
-    );
-    if (refreshToken.error) {
-        return refreshToken;
+    if (savedUser) {
+        const refreshSession = await findOne(RefreshSession, {user_id: savedUser.id, fingerprint: fingerprint});
+        if (refreshSession) {
+            // There is no need to wait for result
+            destroy(refreshSession);
+        }
+
+        if (savedUser.error) {
+            return {
+                status: 400,
+                body: savedUser.error
+            };
+        }
+        const [accessToken, refreshToken] = await Promise.all(
+            [
+                createAccessToken(savedUser),
+                createRefreshSession(savedUser.id, fingerprint, userAgent)
+            ]
+        );
+        if (refreshToken.error) {
+            return {
+                status: 400,
+                body: refreshToken.error
+            };
+        }
+        return {
+            status: 200,
+            body: {
+                accessToken: accessToken,
+                refreshToken: refreshToken
+            }
+        };
     }
     return {
-        accessToken: accessToken,
-        refreshToken: refreshToken
-    };
+        status: 401,
+        body: 'UNAUTHORIZED'
+    }
 };
 
 module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, userAgent) => {
@@ -73,14 +138,20 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
         if (refreshSession) {
             await destroy(refreshSession);
             if (refreshSession.fingerprint !== fingerprint) {
-                return {error: 'INVALID_REFRESH_SESSION'};
+                return {
+                    status: 400,
+                    body: 'INVALID_REFRESH_SESSION'
+                };
             }
             if (refreshSession.expiresIn < new Date().getTime()) {
-                return {error: 'TOKEN_EXPIRED'};
+                return {
+                    status: 400,
+                    body: 'TOKEN_EXPIRED'
+                };
             }
             const user = await getUserCredentialsFromToken(accessToken);
             if (user.err) {
-                return {status: 403, error: user.err}
+                return {status: 403, body: user.err}
             }
             const [newAccessToken, newRefreshToken] = await Promise.all(
                 [
@@ -90,8 +161,11 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
             );
 
             return {
-                accessToken: newAccessToken,
-                refreshToken: newRefreshToken
+                status: 200,
+                body: {
+                    accessToken: newAccessToken,
+                    refreshToken: newRefreshToken
+                }
             };
         }
     }

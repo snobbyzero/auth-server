@@ -27,6 +27,7 @@ app.use(bodyParser.json());
 app.use(cookieParser(secretCookieKey));
 
 app.use('/auth/google', require('./controllers/GoogleAuthController'));
+app.use('/auth/base', require('./controllers/AuthController'));
 
 app.set('port', process.env.PORT || 3000);
 
