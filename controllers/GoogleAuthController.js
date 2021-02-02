@@ -5,6 +5,7 @@ const logger = pino(dest);
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const asyncMiddleware = require('../utils/asyncMiddleware');
+const {createTokensByGoogleId} = require("../services/AuthService");
 const {updateTokens} = require("../services/AuthService");
 const {createTokensViaCredentials} = require("../services/AuthService");
 const {User} = require("../db/models/User");
@@ -25,7 +26,7 @@ router.get("/redirect", passport.authenticate("google", {session: false}), async
     if (req.user.password == null) {
         res.status(401).send(req.user);
     } else {
-        const json = await createTokensViaCredentials(req.user, req.headers['fingerprint'], req.get('User-Agent'));
+        const json = await createTokensByGoogleId(req.user, req.headers['fingerprint'], req.get('User-Agent'));
         if (json.status === 200) {
             res.cookie('refreshToken', json.body.refreshToken, {
                 httpOnly: true,
@@ -33,6 +34,7 @@ router.get("/redirect", passport.authenticate("google", {session: false}), async
                 signed: true
             });
         }
+        res.set('Authorization', json.body.accessToken);
         res.status(json.status).send(json.body);
     }
 }));
@@ -42,7 +44,7 @@ passport.use(new GoogleStrategy(
     {
         clientID: process.env.googleClientID,
         clientSecret: process.env.googleClientSecret,
-        callbackURL: '/auth/google/redirect'
+        callbackURL: 'auth/google/redirect'
     }, async (accessToken, refreshToken, profile, cb) => {
         const user = await findOne(User, {googleId: profile.id});
         if (user) {

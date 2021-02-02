@@ -10,6 +10,41 @@ const {destroy} = require("../utils/dbFunctions");
 
 const secretKey = process.env.jwtSecretKey;
 
+module.exports.createTokensByGoogleId = async (user, fingerprint, userAgent) => {
+    const savedUser = await getOrCreateUserByGoogleId(user);
+    if (savedUser.error) {
+        return {
+            status: 400,
+            body: savedUser.error
+        }
+    }
+    return await createTokensViaCredentials(savedUser, fingerprint, userAgent)
+}
+
+module.exports.createTokensByEmailAndPassword = async (user, fingerprint, userAgent) => {
+    const savedUser = await getUserByEmailAndPassword(user);
+    if (savedUser.error) {
+        return {
+            status: 400,
+            body: savedUser.error
+        }
+    }
+    return await createTokensViaCredentials(savedUser, fingerprint, userAgent);
+}
+
+
+module.exports.createUserAndTokensByEmailAndPassword = async (user, fingerprint, userAgent) => {
+    let savedUser = await findOne(User, {email: user.email});
+    if (savedUser) {
+        return {
+            status: 400,
+            body: 'ALREADY_EXISTS'
+        }
+    }
+    savedUser = await createUserByEmailAndPassword(user);
+    return await createTokensViaCredentials(savedUser, fingerprint, userAgent)
+}
+
 const createAccessToken = async (user) => {
     const token = await jwt.sign({id: user.id, email: user.email}, secretKey, {
         algorithm: 'HS256',
@@ -36,62 +71,36 @@ const createRefreshSession = async (userId, fingerprint, userAgent) => {
     return refreshToken;
 };
 
-const findOrCreateUser = async (user) => {
-    console.log(user);
-    let savedUser;
-    // If user try to sign in/up via Google OAuth2
-    if (user.googleId) {
-        savedUser = await findOne(User, {google_id: user.googleId});
-    } else {
-        savedUser = await findOne(User, {email: user.email});
-        if (savedUser && !(await verify(user.password, savedUser.password))) {
-            return null;
-        }
-    }
+const createUserByEmailAndPassword = async (user) => {
+    return await create(User, {
+        email: user.email,
+        password: await hash(user.password)
+    });
+}
+
+const getOrCreateUserByGoogleId = async (user) => {
+    const savedUser = await findOne(User, {google_id: user.googleId});
     if (savedUser) {
         return savedUser;
     }
     return await create(User, {
-        google_id: user.googleId,
         email: user.email,
-        password: await hash(user.password)
+        google_id: user.googleId
     });
-};
+}
 
-module.exports.addPassword = async (user) => {
-    const savedUser = await findOne(User, {
-        id: user.id,
-        google_id: user.googleId,
-        email: user.email,
-        password: null
-    });
+const getUserByEmailAndPassword = async (user) => {
+    const savedUser = await findOne(User, {email: user.email});
     if (savedUser) {
-        const u = await update(User, {password: await hash(user.password)}, [], {
-            id: user.id,
-            google_id: user.googleId,
-            email: user.email
-        });
-        if (u.error) {
-            return {
-                status: 400,
-                body: u
-            };
-        } else {
-            return {
-                status: 200,
-                body: 'OK'
-            };
+        if (await verify(user.password, savedUser.password)) {
+            return savedUser;
         }
-    } else {
-        return {
-            status: 404,
-            body: 'NOT_FOUND'
-        }
+        return {error: 'INCORRECT_PASSWORD'}
     }
-};
+    return {error: 'NOT_FOUND'};
+}
 
-module.exports.createTokensViaCredentials = async (user, fingerprint, userAgent) => {
-    const savedUser = await findOrCreateUser(user);
+const createTokensViaCredentials = async (savedUser, fingerprint, userAgent) => {
 
     if (savedUser) {
         const refreshSession = await findOne(RefreshSession, {user_id: savedUser.id, fingerprint: fingerprint});
@@ -132,7 +141,8 @@ module.exports.createTokensViaCredentials = async (user, fingerprint, userAgent)
     }
 };
 
-module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, userAgent) => {
+module.exports.updateTokens = async (refreshToken, fingerprint, userAgent) => {
+    console.log(`Refresh token: ${refreshToken}`);
     if (refreshToken) {
         const refreshSession = await findOne(RefreshSession, {refreshToken: refreshToken});
         if (refreshSession) {
@@ -149,7 +159,7 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
                     body: 'TOKEN_EXPIRED'
                 };
             }
-            const user = await getUserCredentialsFromToken(accessToken);
+            const user = await findOne(User, {id: refreshSession.user_id});
             if (user.err) {
                 return {status: 403, body: user.err}
             }
@@ -169,14 +179,5 @@ module.exports.updateTokens = async (accessToken, refreshToken, fingerprint, use
             };
         }
     }
-    return {status: 403, error: 'INVALID_REFRESH_TOKEN'};
-};
-
-const getUserCredentialsFromToken = async (accessToken) => {
-    const token = accessToken.split(' ')[1];
-    try {
-        return jwt.verify(token, secretKey);
-    } catch (err) {
-        return {error: err};
-    }
+    return {status: 400, body: 'INVALID_REFRESH_TOKEN'};
 };
